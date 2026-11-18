@@ -372,19 +372,13 @@ class SocialPostDetailView(PostQueryMixin, SocialAPIView):
         return Response(self.get_serializer(self.get_object(pk=pk)).data)
 
     def delete(self, request, pk):
+        from common.fsm import StateTransitionError
+
         post = self.get_object(pk=pk)
-        if post.state == "published":
-            return Response(
-                {
-                    "detail": "This is already live on the platforms; deleting the "
-                    "record here would not remove it. Delete each target instead.",
-                    "code": "already_published",
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-        post.targets.update(state="cancelled")
-        post.state = "cancelled"
-        post.save(update_fields=["state", "updated_at"])
+        try:
+            post.cancel()
+        except StateTransitionError as exc:
+            return Response(exc.to_dict(), status=status.HTTP_409_CONFLICT)
         return Response(self.get_serializer(post).data)
 
 
@@ -409,22 +403,25 @@ class SocialTargetRetryView(SocialAPIView):
         )
 
     def post(self, request, pk):
+        from common.fsm import StateTransitionError
+
         target = self.get_object(pk=pk)
-        if target.state == "published":
+        try:
+            target.requeue()
+        except StateTransitionError as exc:
             return Response(
-                {"detail": "Already published.", "code": "already_published"},
+                {
+                    "detail": "Already published."
+                    if exc.code == "already_published"
+                    else str(exc),
+                    "code": exc.code,
+                    "state": exc.from_state,
+                    "allowed_states": list(exc.allowed),
+                },
                 status=status.HTTP_409_CONFLICT,
             )
 
-        target.state = "pending"
-        target.attempts = 0
-        target.last_error = ""
-        target.next_attempt_at = timezone.now()
-        target.save(
-            update_fields=[
-                "state", "attempts", "last_error", "next_attempt_at", "updated_at",
-            ]
-        )
+        target.post.recompute_state()
 
         from .tasks import publish_target
 
