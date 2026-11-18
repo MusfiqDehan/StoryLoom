@@ -513,3 +513,37 @@ class TestAPI:
             for row in auth_client(admin).get(f"{BASE}/social/accounts/").json()["results"]
         }
         assert names == {"Ours"}
+
+    def test_cancelling_a_partial_post_preserves_published_targets(
+        self, auth_client, admin, account_factory, default_site
+    ):
+        post = SocialPost.objects.create(site=default_site, state="partial")
+        live = SocialPostTarget.objects.create(
+            post=post,
+            account=account_factory(platform="linkedin"),
+            platform="linkedin",
+            caption="ok",
+            state="published",
+            external_id="e1",
+        )
+        pending = SocialPostTarget.objects.create(
+            post=post,
+            account=account_factory(platform="x"),
+            platform="x",
+            caption="ok",
+            state="failed",
+        )
+        response = auth_client(admin).delete(f"{BASE}/social/posts/{post.pk}/")
+        assert response.status_code == 200
+        live.refresh_from_db()
+        pending.refresh_from_db()
+        assert live.state == "published"
+        assert pending.state == "cancelled"
+
+    def test_cancelling_an_already_cancelled_post_returns_409(
+        self, auth_client, admin, default_site
+    ):
+        post = SocialPost.objects.create(site=default_site, state="cancelled")
+        response = auth_client(admin).delete(f"{BASE}/social/posts/{post.pk}/")
+        assert response.status_code == 409
+        assert response.json()["code"] == "already_cancelled"
