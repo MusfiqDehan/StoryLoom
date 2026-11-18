@@ -26,9 +26,14 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from common.fsm import validate_transition
 from common.tenancy import TenantModel
 
 from .constraints import PLATFORM_CHOICES
+from .states import (
+    POST_TRANSITIONS,
+    TARGET_TRANSITIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,9 +238,44 @@ class SocialPost(TenantModel):
             new_state = self.state
 
         if new_state != self.state:
+            validate_transition(
+                self.state, new_state, POST_TRANSITIONS, entity="social post"
+            )
             self.state = new_state
             self.save(update_fields=["state", "updated_at"])
         return new_state
+
+    def cancel(self):
+        """Cancel unpublished targets and mark the post cancelled if none went live."""
+        from common.fsm import StateTransitionError
+
+        if self.state == "published":
+            raise StateTransitionError(
+                "This is already live on the platforms; deleting the "
+                "record here would not remove it. Delete each target instead.",
+                code="already_published",
+                from_state=self.state,
+                to_state="cancelled",
+            )
+        if self.state == "cancelled":
+            raise StateTransitionError(
+                "This post is already cancelled.",
+                code="already_cancelled",
+                from_state=self.state,
+                to_state="cancelled",
+            )
+        # Preserve targets that already succeeded instead of erasing live records.
+        self.targets.exclude(state="published").update(
+            state="cancelled", next_attempt_at=None
+        )
+        if self.targets.filter(state="published").exists():
+            return self.recompute_state()
+        validate_transition(
+            self.state, "cancelled", POST_TRANSITIONS, entity="social post"
+        )
+        self.state = "cancelled"
+        self.save(update_fields=["state", "updated_at"])
+        return self.state
 
 
 class SocialPostTarget(models.Model):
@@ -293,7 +333,57 @@ class SocialPostTarget(models.Model):
     def __str__(self):
         return f"{self.platform} target for post {self.post_id} [{self.state}]"
 
+    def _transition(self, to_state: str, *, code: str = "invalid_transition"):
+        return validate_transition(
+            self.state,
+            to_state,
+            TARGET_TRANSITIONS,
+            entity="social target",
+            code=code,
+        )
+
+    def mark_publishing(self):
+        self._transition("publishing")
+        self.state = "publishing"
+        type(self).objects.filter(pk=self.pk).update(
+            state="publishing", updated_at=timezone.now()
+        )
+
+    def schedule_retry(self, error: str, *, next_attempt_at, request_snapshot=None, increment_attempts: bool = True):
+        self._transition("retrying")
+        self.state = "retrying"
+        self.last_error = (error or "")[:2000]
+        self.next_attempt_at = next_attempt_at
+        fields = ["state", "last_error", "next_attempt_at", "updated_at"]
+        if request_snapshot is not None:
+            self.request_snapshot = request_snapshot
+            fields.append("request_snapshot")
+        if increment_attempts:
+            self.attempts += 1
+            fields.append("attempts")
+        self.save(update_fields=fields)
+
+    def requeue(self):
+        self._transition(
+            "pending",
+            code="already_published" if self.state == "published" else "invalid_transition",
+        )
+        self.state = "pending"
+        self.attempts = 0
+        self.last_error = ""
+        self.next_attempt_at = timezone.now()
+        self.save(
+            update_fields=[
+                "state",
+                "attempts",
+                "last_error",
+                "next_attempt_at",
+                "updated_at",
+            ]
+        )
+
     def mark_published(self, external_id: str, url: str, response=None):
+        self._transition("published")
         self.state = "published"
         self.external_id = external_id or ""
         self.external_url = url or ""
@@ -309,6 +399,7 @@ class SocialPostTarget(models.Model):
         )
 
     def mark_failed(self, error: str):
+        self._transition("failed")
         self.state = "failed"
         self.last_error = (error or "")[:2000]
         self.next_attempt_at = None
