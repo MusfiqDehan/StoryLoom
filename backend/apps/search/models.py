@@ -16,7 +16,15 @@ from __future__ import annotations
 from django.db import models
 from django.utils import timezone
 
+from common.fsm import validate_transition
 from common.tenancy import TenantModel
+
+
+INDEXING_TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset({"indexed", "failed"}),
+    "failed": frozenset({"indexed", "failed"}),
+    "indexed": frozenset({"indexed", "failed"}),
+}
 
 
 class IndexingLog(TenantModel):
@@ -71,6 +79,9 @@ class IndexingLog(TenantModel):
         assignment outside this method is silently dropped -- and the symptom
         would be drift repair believing every indexed article is stale.
         """
+        validate_transition(
+            self.state, state, INDEXING_TRANSITIONS, entity="indexing log"
+        )
         self.state = state
         self.attempts += 1
         self.last_error = error[:1000]
