@@ -24,6 +24,13 @@ from common.throttles import StudioRateThrottle
 from common.views import TenantScopedAPIView
 
 from .models import AuditLogEntry, ReviewAssignment, ReviewComment
+from .reviews import (
+    RESOLUTION_STATES,
+    ReviewTransitionError,
+    reopen_comment,
+    resolve_assignment,
+    resolve_comment,
+)
 from .revisions import create_revision, diff_snapshots, restore, snapshot_of
 from .serializers import (
     AuditLogEntrySerializer,
@@ -605,14 +612,16 @@ class ReviewAssignmentResolveView(ReviewAssignmentQueryMixin, EditorialAPIView):
     def post(self, request, pk):
         assignment = self.get_object(pk=pk)
         state = request.data.get("state")
-        if state not in ("approved", "changes_requested", "cancelled"):
+        if state not in RESOLUTION_STATES:
             return Response(
                 {"state": ["Must be approved, changes_requested or cancelled."]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        assignment.state = state
-        assignment.resolved_at = timezone.now()
-        assignment.save(update_fields=["state", "resolved_at"])
+        try:
+            resolve_assignment(assignment, state)
+        except ReviewTransitionError as exc:
+            return Response(exc.to_dict(), status=status.HTTP_409_CONFLICT)
+
         record(
             site=assignment.site,
             action="review_resolve",
@@ -673,10 +682,16 @@ class ReviewCommentResolveView(ReviewCommentQueryMixin, EditorialAPIView):
 
     def post(self, request, pk):
         comment = self.get_object(pk=pk)
-        comment.is_resolved = True
-        comment.resolved_by = request.user
-        comment.resolved_at = timezone.now()
-        comment.save(update_fields=["is_resolved", "resolved_by", "resolved_at"])
+        action = request.data.get("action") or "resolve"
+        if action not in ("resolve", "reopen"):
+            return Response(
+                {"action": ["Must be resolve or reopen."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if action == "reopen":
+            reopen_comment(comment)
+        else:
+            resolve_comment(comment, user=request.user)
         return Response(self.get_serializer(comment).data)
 
 
