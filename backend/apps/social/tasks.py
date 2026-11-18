@@ -78,7 +78,7 @@ def publish_target(self, target_id: int) -> dict:
         target.post.recompute_state()
         return {"target": target_id, "failed": "validation", "problems": problems}
 
-    SocialPostTarget.objects.filter(pk=target.pk).update(state="publishing")
+    target.mark_publishing()
 
     try:
         media = provider.upload_media(platform=target.platform, media=target.media)
@@ -94,17 +94,12 @@ def publish_target(self, target_id: int) -> dict:
         # deliberately does not advance, and the provider's state is stored so
         # the retry resumes rather than starting a second container.
         snapshot = {**(target.request_snapshot or {}), **(exc.state or {})}
-        target.state = "retrying"
-        target.request_snapshot = snapshot
-        target.next_attempt_at = timezone.now() + timezone.timedelta(
-            seconds=exc.retry_after
-        )
-        target.last_error = str(exc)
-        target.save(
-            update_fields=[
-                "state", "request_snapshot", "next_attempt_at", "last_error",
-                "updated_at",
-            ]
+        target.schedule_retry(
+            str(exc),
+            next_attempt_at=timezone.now()
+            + timezone.timedelta(seconds=exc.retry_after),
+            request_snapshot=snapshot,
+            increment_attempts=False,
         )
         target.post.recompute_state()
         return {"target": target_id, "not_ready": exc.retry_after}
@@ -114,19 +109,15 @@ def publish_target(self, target_id: int) -> dict:
         target.post.recompute_state()
         return {"target": target_id, "failed": "auth"}
     except ProviderError as exc:
-        target.attempts += 1
-        if exc.permanent or target.attempts >= MAX_ATTEMPTS:
+        if exc.permanent or (target.attempts + 1) >= MAX_ATTEMPTS:
+            target.attempts += 1
             target.mark_failed(str(exc))
         else:
-            target.state = "retrying"
-            target.last_error = str(exc)[:2000]
-            target.next_attempt_at = timezone.now() + timezone.timedelta(
-                seconds=backoff_seconds(target.attempts + 1)
-            )
-            target.save(
-                update_fields=[
-                    "state", "attempts", "last_error", "next_attempt_at", "updated_at",
-                ]
+            target.schedule_retry(
+                str(exc),
+                next_attempt_at=timezone.now()
+                + timezone.timedelta(seconds=backoff_seconds(target.attempts + 2)),
+                increment_attempts=True,
             )
         target.post.recompute_state()
         return {"target": target_id, "failed": str(exc), "attempts": target.attempts}
