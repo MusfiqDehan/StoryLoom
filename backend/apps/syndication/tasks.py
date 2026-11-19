@@ -52,9 +52,7 @@ def deliver_content(self, delivery_id: int) -> dict:
         # before the ack is re-run. The row already says it succeeded.
         return {"delivery": delivery_id, "skipped": "already delivered"}
     if not delivery.destination.is_deliverable:
-        delivery.state = "skipped"
-        delivery.last_error = "Destination is disabled."
-        delivery.save(update_fields=["state", "last_error", "updated_at"])
+        delivery.mark_skipped("Destination is disabled.")
         return {"delivery": delivery_id, "skipped": "destination disabled"}
 
     ok = send(delivery)
