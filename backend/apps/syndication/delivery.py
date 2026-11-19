@@ -131,9 +131,7 @@ def send(delivery: ContentDelivery) -> bool:
     destination = delivery.destination
     url = destination.resolved_url()
     if not url:
-        delivery.state = "skipped"
-        delivery.last_error = "Destination has no endpoint URL."
-        delivery.save(update_fields=["state", "last_error", "updated_at"])
+        delivery.mark_skipped("Destination has no endpoint URL.")
         return False
 
     body = json.dumps(delivery.payload_snapshot, separators=(",", ":"))
@@ -149,7 +147,7 @@ def send(delivery: ContentDelivery) -> bool:
         **(destination.headers or {}),
     }
 
-    ContentDelivery.objects.filter(pk=delivery.pk).update(state="delivering")
+    delivery.mark_delivering()
 
     try:
         response = requests.post(url, data=body, headers=headers, timeout=TIMEOUT_SECONDS)
@@ -174,17 +172,9 @@ def send(delivery: ContentDelivery) -> bool:
     else:
         # Permanent: stop immediately rather than burning the remaining seven
         # attempts on a URL or credential that is simply wrong.
-        delivery.state = "abandoned"
-        delivery.attempts += 1
-        delivery.next_attempt_at = None
-        delivery.last_error = (
-            f"HTTP {response.status_code} (not retryable): {response.text[:500]}"
-        )
-        delivery.save(
-            update_fields=[
-                "state", "attempts", "next_attempt_at", "last_error",
-                "response_status", "updated_at",
-            ]
+        delivery.mark_abandoned(
+            f"HTTP {response.status_code} (not retryable): {response.text[:500]}",
+            response_status=response.status_code,
         )
     return False
 
