@@ -33,6 +33,15 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from common.fsm import validate_transition
+
+from .states import (
+    DELIVERY_TRANSITIONS,
+    DESTINATION_ACTIVE,
+    DESTINATION_AUTO_DISABLED,
+    DESTINATION_PAUSED,
+)
+
 from common.retry import MAX_ATTEMPTS, backoff_seconds
 
 
@@ -217,6 +226,32 @@ class Destination(models.Model):
     def is_deliverable(self) -> bool:
         return self.is_active and self.disabled_at is None
 
+    @property
+    def health_state(self) -> str:
+        """Derived circuit-breaker state for UI and agent callers."""
+        if not self.is_active:
+            return DESTINATION_PAUSED
+        if self.disabled_at is not None:
+            return DESTINATION_AUTO_DISABLED
+        return DESTINATION_ACTIVE
+
+    def enable(self):
+        """Clear both pause flags and circuit-breaker failure state."""
+        self.is_active = True
+        self.disabled_at = None
+        self.disabled_reason = ""
+        self.consecutive_failures = 0
+        self.save(
+            update_fields=[
+                "is_active",
+                "disabled_at",
+                "disabled_reason",
+                "consecutive_failures",
+                "updated_at",
+            ]
+        )
+        return self
+
     def accepts(self, event: str) -> bool:
         return not self.events or event in self.events
 
@@ -326,15 +361,77 @@ class ContentDelivery(models.Model):
     def is_retryable(self) -> bool:
         return self.state in ("pending", "failed") and self.attempts < MAX_ATTEMPTS
 
+    def _transition(self, to_state: str, *, code: str = "invalid_transition"):
+        return validate_transition(
+            self.state,
+            to_state,
+            DELIVERY_TRANSITIONS,
+            entity="content delivery",
+            code=code,
+        )
+
+    def mark_delivering(self):
+        self._transition("delivering")
+        self.state = "delivering"
+        type(self).objects.filter(pk=self.pk).update(
+            state="delivering", updated_at=timezone.now()
+        )
+
+    def mark_skipped(self, reason: str):
+        self._transition("skipped")
+        self.state = "skipped"
+        self.last_error = (reason or "")[:2000]
+        self.next_attempt_at = None
+        self.save(update_fields=["state", "last_error", "next_attempt_at", "updated_at"])
+
+    def mark_abandoned(self, error: str, response_status: int | None = None):
+        self._transition("abandoned")
+        self.state = "abandoned"
+        self.attempts += 1
+        self.next_attempt_at = None
+        self.last_error = (error or "")[:2000]
+        fields = [
+            "state",
+            "attempts",
+            "next_attempt_at",
+            "last_error",
+            "updated_at",
+        ]
+        if response_status is not None:
+            self.response_status = response_status
+            fields.append("response_status")
+        self.save(update_fields=fields)
+
+    def requeue(self):
+        """Reset retry state for manual re-dispatch."""
+        self._transition(
+            "pending",
+            code="already_delivered" if self.state == "delivered" else "invalid_transition",
+        )
+        self.state = "pending"
+        self.attempts = 0
+        self.next_attempt_at = timezone.now()
+        self.last_error = ""
+        self.save(
+            update_fields=[
+                "state",
+                "attempts",
+                "next_attempt_at",
+                "last_error",
+                "updated_at",
+            ]
+        )
+
     def schedule_retry(self, error: str = ""):
         """Record a failure and set the next attempt, or give up."""
         self.attempts += 1
         self.last_error = (error or "")[:2000]
-        if self.attempts >= MAX_ATTEMPTS:
-            self.state = "abandoned"
+        next_state = "abandoned" if self.attempts >= MAX_ATTEMPTS else "failed"
+        self._transition(next_state)
+        self.state = next_state
+        if next_state == "abandoned":
             self.next_attempt_at = None
         else:
-            self.state = "failed"
             self.next_attempt_at = timezone.now() + timezone.timedelta(
                 seconds=backoff_seconds(self.attempts + 1)
             )
@@ -345,6 +442,7 @@ class ContentDelivery(models.Model):
         )
 
     def mark_delivered(self, status_code: int, body):
+        self._transition("delivered")
         self.attempts += 1
         self.state = "delivered"
         self.response_status = status_code
