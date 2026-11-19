@@ -10,6 +10,7 @@ class DestinationSerializer(serializers.ModelSerializer):
         source="target_site.name", default=None, read_only=True
     )
     is_deliverable = serializers.BooleanField(read_only=True)
+    health_state = serializers.CharField(read_only=True)
     #: Never the secret itself. Whether one exists is all the UI needs, and it
     #: is the only thing that can be shown without turning the destinations
     #: list into a credential dump.
@@ -23,7 +24,7 @@ class DestinationSerializer(serializers.ModelSerializer):
         fields = (
             "id", "name", "kind", "target_site", "target_site_name",
             "endpoint_url", "headers", "events", "is_active", "is_deliverable",
-            "disabled_at", "disabled_reason", "consecutive_failures",
+            "health_state", "disabled_at", "disabled_reason", "consecutive_failures",
             "has_secret", "created_at", "updated_at",
         )
         read_only_fields = (
