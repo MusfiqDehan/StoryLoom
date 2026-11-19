@@ -66,8 +66,8 @@ export default function AnalyticsPage() {
               className={cn(
                 "rounded-md px-2.5 py-1 text-xs font-medium transition",
                 days === range
-                  ? "bg-[var(--sl-card)] text-white bg-[var(--sl-action)] text-[var(--sl-ink)]"
-                  : "bg-[var(--sl-soft)] text-[var(--sl-ink)] bg-[var(--sl-card)]",
+                  ? "bg-[var(--sl-action)] text-white"
+                  : "bg-[var(--sl-soft)] text-[var(--sl-ink)] hover:opacity-85",
               )}
             >
               {range}d
@@ -239,10 +239,10 @@ function Sparkline({
     <div className="rounded-xl border border-[var(--sl-line)] bg-[var(--sl-card)] p-4">
       <div className="mb-2 flex items-center gap-4 text-xs">
         <span className="flex items-center gap-1.5 text-[var(--sl-muted)]">
-          <span className="h-0.5 w-4 bg-[var(--sl-soft)]" /> Views
+          <span className="h-0.5 w-4 bg-[var(--sl-muted)]" /> Views
         </span>
         <span className="flex items-center gap-1.5 text-[var(--sl-muted)]">
-          <span className="h-0.5 w-4 bg-[var(--sl-soft)]" /> Annotation opens
+          <span className="h-0.5 w-4 bg-[var(--sl-accent)]" /> Annotation opens
         </span>
       </div>
       <svg
