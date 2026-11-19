@@ -434,3 +434,25 @@ class TestAPI:
         )
         rows = auth_client(admin).get(f"{BASE}/deliveries/").json()["results"]
         assert [row["article_label"] for row in rows] == [live_article.title]
+
+    def test_destination_exposes_health_state(self, auth_client, admin, destination):
+        destination.is_active = False
+        destination.save(update_fields=["is_active"])
+        listed = auth_client(admin).get(f"{BASE}/destinations/").json()["results"]
+        row = next(item for item in listed if item["id"] == destination.pk)
+        assert row["health_state"] == "paused"
+
+        destination.enable()
+        listed = auth_client(admin).get(f"{BASE}/destinations/").json()["results"]
+        row = next(item for item in listed if item["id"] == destination.pk)
+        assert row["health_state"] == "active"
+
+    def test_delivered_row_cannot_transition(self, destination, live_article, posts):
+        from common.fsm import StateTransitionError
+
+        delivery = enqueue(live_article, "publish")[0]
+        send(delivery)
+        delivery.refresh_from_db()
+        assert delivery.state == "delivered"
+        with pytest.raises(StateTransitionError):
+            delivery.mark_skipped("too late")
