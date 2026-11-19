@@ -85,16 +85,7 @@ class DestinationEnableView(DestinationQueryMixin, SyndicationAPIView):
 
     def post(self, request, pk):
         destination = self.get_object(pk=pk)
-        destination.is_active = True
-        destination.disabled_at = None
-        destination.disabled_reason = ""
-        destination.consecutive_failures = 0
-        destination.save(
-            update_fields=[
-                "is_active", "disabled_at", "disabled_reason",
-                "consecutive_failures", "updated_at",
-            ]
-        )
+        destination.enable()
         return Response(self.get_serializer(destination).data)
 
 
@@ -158,14 +149,6 @@ class DeliveryRetryView(DeliveryQueryMixin, BaseAPIView):
 
     def post(self, request, pk):
         delivery = self.get_object(pk=pk)
-        if delivery.state == "delivered":
-            return Response(
-                {
-                    "detail": "This was already delivered successfully.",
-                    "code": "already_delivered",
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
         if not delivery.destination.is_deliverable:
             return Response(
                 {
@@ -174,16 +157,22 @@ class DeliveryRetryView(DeliveryQueryMixin, BaseAPIView):
                 },
                 status=status.HTTP_409_CONFLICT,
             )
+        from common.fsm import StateTransitionError
 
-        delivery.state = "pending"
-        delivery.attempts = 0
-        delivery.next_attempt_at = timezone.now()
-        delivery.last_error = ""
-        delivery.save(
-            update_fields=[
-                "state", "attempts", "next_attempt_at", "last_error", "updated_at",
-            ]
-        )
+        try:
+            delivery.requeue()
+        except StateTransitionError as exc:
+            return Response(
+                {
+                    "detail": "This was already delivered successfully."
+                    if exc.code == "already_delivered"
+                    else str(exc),
+                    "code": exc.code,
+                    "state": exc.from_state,
+                    "allowed_states": list(exc.allowed),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         from .tasks import deliver_content
 
