@@ -167,9 +167,9 @@ export default function ContentListPage() {
   const activeFilters = ["status", "q", "category", "mine"].filter((k) => params[k]);
 
   return (
-    <div className="flex h-full min-w-0">
+    <div className="flex min-h-[calc(100vh-3.5rem)] min-w-0 flex-col lg:flex-row">
       {showFilters && (
-        <aside className="hidden w-60 shrink-0 border-r border-[var(--sl-line)] bg-[var(--sl-card)] p-4 lg:block">
+        <aside className="w-full shrink-0 border-b border-[var(--sl-line)] bg-[var(--sl-card)] p-4 lg:w-60 lg:border-b-0 lg:border-r">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--sl-muted)]">
               Filters
@@ -235,7 +235,7 @@ export default function ContentListPage() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="border-b border-[var(--sl-line)] bg-[var(--sl-card)] px-6 py-4">
+        <div className="border-b border-[var(--sl-line)] bg-[var(--sl-card)] px-4 py-4 sm:px-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="font-display text-2xl font-bold text-[var(--sl-ink)]">
@@ -250,6 +250,7 @@ export default function ContentListPage() {
                 variant="ghost"
                 size="icon"
                 className="lg:hidden"
+                aria-expanded={showFilters}
                 onClick={() => setShowFilters((v) => !v)}
                 aria-label="Toggle filters"
               >
@@ -264,7 +265,7 @@ export default function ContentListPage() {
           </div>
 
           {/* Saved views are plain links because the state is in the URL. */}
-          <div className="flex flex-wrap items-center gap-1 border-b border-[var(--sl-line)]">
+          <div className="-mx-1 flex items-center gap-1 overflow-x-auto border-b border-[var(--sl-line)] px-1">
             {SAVED_VIEWS.map((view) => (
               <button
                 key={view.key}
@@ -275,10 +276,10 @@ export default function ContentListPage() {
                   })
                 }
                 className={cn(
-                  "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+                  "-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors",
                   activeView === view.key
-                    ? "border-[var(--sl-soft)] text-[var(--sl-accent)]"
-                    : "border-transparent hover:text-[var(--sl-ink)] hover:text-[var(--sl-muted)]",
+                    ? "border-[var(--sl-accent)] text-[var(--sl-accent)]"
+                    : "border-transparent text-[var(--sl-muted)] hover:text-[var(--sl-ink)]",
                 )}
               >
                 {view.label}
@@ -306,7 +307,7 @@ export default function ContentListPage() {
         </div>
 
         {selected.size > 0 && (
-          <div className="flex items-center justify-between border-b border-[var(--sl-soft)] bg-[var(--sl-soft)] px-6 py-2.5 text-sm dark:bg-primary-950/40">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--sl-line)] bg-[var(--sl-soft)] px-4 py-2.5 text-sm sm:px-6 dark:bg-primary-950/40">
             <span className="font-medium text-[var(--sl-accent)]">
               {selected.size} selected
             </span>
@@ -333,7 +334,7 @@ export default function ContentListPage() {
           }}
         />
 
-        <div className="min-w-0 flex-1 overflow-auto p-6">
+        <div className="min-w-0 flex-1 overflow-auto p-4 sm:p-6">
           {error && !loading ? (
             <p className="py-16 text-center text-sm text-red-600">{error}</p>
           ) : loading ? (
@@ -497,7 +498,7 @@ function FilterOption({
         "block w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
         active
           ? "bg-[var(--sl-soft)] font-medium text-[var(--sl-accent)] dark:bg-primary-950/50"
-          : "text-[var(--sl-ink)] hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]",
+          : "text-[var(--sl-ink)] hover:bg-[var(--sl-soft)]",
       )}
     >
       {children}
