@@ -21,8 +21,10 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/primitives";
+import { useAsyncFlow } from "@/lib/fsm/useAsyncFlow";
 import {
   deleteDestination,
+  deriveDestinationHealth,
   enableDestination,
   listDeliveries,
   listDestinations,
@@ -153,7 +155,7 @@ function Destinations() {
 }
 
 function destinationDisabledNote(rows: Destination[]) {
-  const disabled = rows.filter((d) => d.disabled_at).length;
+  const disabled = rows.filter((d) => deriveDestinationHealth(d) === "auto_disabled").length;
   if (!disabled) return null;
   return (
     <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
@@ -183,8 +185,8 @@ function Deliveries() {
             onClick={() => setState(filter.value)}
             className={`rounded-full px-3 py-1 text-xs font-medium transition ${
               state === filter.value
-                ? "bg-[var(--sl-card)] text-white bg-[var(--sl-action)] text-[var(--sl-ink)]"
-                : "bg-[var(--sl-soft)] text-[var(--sl-ink)] hover:bg-[var(--sl-soft)] bg-[var(--sl-card)]"
+                ? "bg-[var(--sl-action)] text-white"
+                : "bg-[var(--sl-soft)] text-[var(--sl-ink)] hover:opacity-85"
             }`}
           >
             {filter.label}
@@ -229,34 +231,38 @@ function DestinationDialog({
   );
   const [url, setUrl] = useState(destination?.endpoint_url ?? "");
   const [isActive, setIsActive] = useState(destination?.is_active ?? true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const actionFlow = useAsyncFlow();
 
   const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const saved = await saveDestination(destination?.id ?? null, {
-        name,
-        kind: kind as Destination["kind"],
-        target_site: kind === "site" ? targetSite : null,
-        endpoint_url: kind === "site" ? "" : url,
-        is_active: isActive,
-      });
-      onClose(saved);
-    } catch (err: unknown) {
-      const data = (err as { response?: { data?: Record<string, string[]> } }).response
-        ?.data;
-      setError(
-        data ? Object.values(data).flat().join(" ") : "Could not save this destination.",
-      );
-      setBusy(false);
-    }
+    await actionFlow.run(
+      async () => {
+        const saved = await saveDestination(destination?.id ?? null, {
+          name,
+          kind: kind as Destination["kind"],
+          target_site: kind === "site" ? targetSite : null,
+          endpoint_url: kind === "site" ? "" : url,
+          is_active: isActive,
+        });
+        onClose(saved);
+      },
+      "Could not save this destination.",
+    );
+  };
+
+  const remove = async () => {
+    if (!destination) return;
+    await actionFlow.run(
+      async () => {
+        await deleteDestination(destination.id);
+        onClose({ ...destination });
+      },
+      "Could not delete this destination.",
+    );
   };
 
   return (
     <Dialog open onOpenChange={() => onClose(null)}>
-      <DialogContent>
+      <DialogContent data-state={actionFlow.dataState}>
         <DialogHeader>
           <DialogTitle>
             {destination ? "Edit destination" : "New destination"}
@@ -283,7 +289,7 @@ function DestinationDialog({
               {KINDS.map((option) => (
                 <label
                   key={option.value}
-                  className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]"
+                  className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--sl-soft)]"
                 >
                   <input
                     type="radio"
@@ -347,7 +353,7 @@ function DestinationDialog({
             Active
           </label>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {actionFlow.error && <p role="alert" className="text-sm text-red-600">{actionFlow.error}</p>}
         </DialogBody>
 
         <DialogFooter>
@@ -355,12 +361,8 @@ function DestinationDialog({
             <Button
               variant="ghost"
               className="mr-auto text-red-600"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                await deleteDestination(destination.id);
-                onClose({ ...destination });
-              }}
+              disabled={actionFlow.isRunning}
+              onClick={remove}
             >
               <Trash2 size={14} /> Delete
             </Button>
@@ -368,8 +370,8 @@ function DestinationDialog({
           <Button variant="secondary" onClick={() => onClose(null)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={busy || !name.trim()}>
-            {busy && <Loader2 size={14} className="animate-spin" />} Save
+          <Button onClick={submit} disabled={actionFlow.isRunning || !name.trim()}>
+            {actionFlow.isRunning && <Loader2 size={14} className="animate-spin" />} Save
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -404,7 +406,7 @@ function SecretDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogBody>
-          <div className="flex items-center gap-2 rounded-lg border border-[var(--sl-line)] bg-[var(--sl-soft)] p-3 bg-[var(--sl-card)]">
+          <div className="flex items-center gap-2 rounded-lg border border-[var(--sl-line)] bg-[var(--sl-soft)] p-3">
             <code className="min-w-0 flex-1 break-all font-mono text-xs">
               {destination.secret}
             </code>
