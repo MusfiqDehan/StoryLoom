@@ -107,7 +107,7 @@ export function TagInput({
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => add(tag.name)}
-                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]"
+                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-[var(--sl-soft)]"
               >
                 {tag.name}
                 <span className="text-xs text-[var(--sl-muted)]">{tag.usage_count}</span>
@@ -124,7 +124,7 @@ export function TagInput({
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => add(draft)}
                   className={cn(
-                    "w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]",
+                    "w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--sl-soft)]",
                     unused.length > 0 &&
                       "border-t border-[var(--sl-line)]",
                   )}
