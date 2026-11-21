@@ -1,0 +1,47 @@
+"""Explicit state definitions and transition tables for social publishing."""
+
+from __future__ import annotations
+
+#: SocialAccount statuses
+ACCOUNT_CONNECTED = "connected"
+ACCOUNT_EXPIRED = "expired"
+ACCOUNT_REVOKED = "revoked"
+ACCOUNT_ERROR = "error"
+
+#: SocialPost states
+POST_DRAFT = "draft"
+POST_SCHEDULED = "scheduled"
+POST_PUBLISHING = "publishing"
+POST_PUBLISHED = "published"
+POST_PARTIAL = "partial"
+POST_FAILED = "failed"
+POST_CANCELLED = "cancelled"
+
+POST_TRANSITIONS: dict[str, frozenset[str]] = {
+    POST_DRAFT: frozenset({POST_SCHEDULED, POST_PUBLISHING, POST_CANCELLED}),
+    POST_SCHEDULED: frozenset({POST_PUBLISHING, POST_CANCELLED}),
+    POST_PUBLISHING: frozenset(
+        {POST_PUBLISHING, POST_PUBLISHED, POST_PARTIAL, POST_FAILED, POST_CANCELLED}
+    ),
+    POST_PARTIAL: frozenset({POST_PUBLISHING, POST_PUBLISHED, POST_PARTIAL, POST_FAILED, POST_CANCELLED}),
+    POST_FAILED: frozenset({POST_PUBLISHING, POST_CANCELLED}),
+    POST_PUBLISHED: frozenset(),
+    POST_CANCELLED: frozenset(),
+}
+
+#: SocialPostTarget states
+TARGET_PENDING = "pending"
+TARGET_PUBLISHING = "publishing"
+TARGET_RETRYING = "retrying"
+TARGET_PUBLISHED = "published"
+TARGET_FAILED = "failed"
+TARGET_CANCELLED = "cancelled"
+
+TARGET_TRANSITIONS: dict[str, frozenset[str]] = {
+    TARGET_PENDING: frozenset({TARGET_PUBLISHING, TARGET_PUBLISHED, TARGET_FAILED, TARGET_RETRYING, TARGET_CANCELLED}),
+    TARGET_PUBLISHING: frozenset({TARGET_PUBLISHED, TARGET_FAILED, TARGET_RETRYING, TARGET_CANCELLED}),
+    TARGET_RETRYING: frozenset({TARGET_PENDING, TARGET_PUBLISHING, TARGET_PUBLISHED, TARGET_FAILED, TARGET_RETRYING, TARGET_CANCELLED}),
+    TARGET_FAILED: frozenset({TARGET_PENDING, TARGET_CANCELLED}),
+    TARGET_CANCELLED: frozenset({TARGET_PENDING}),
+    TARGET_PUBLISHED: frozenset(),
+}
