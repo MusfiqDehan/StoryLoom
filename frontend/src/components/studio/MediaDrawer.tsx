@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/primitives";
+import { useAsyncFlow } from "@/lib/fsm/useAsyncFlow";
 import { normalizeMediaUrl } from "@/lib/media";
 import { deleteMedia, saveMedia, type MediaRow } from "@/lib/studio-api";
 
@@ -49,9 +50,8 @@ export function MediaDrawer({
   const [alt, setAlt] = useState(item.alt_text ?? "");
   const [title, setTitle] = useState(item.title ?? "");
   const [focal, setFocal] = useState({ x: 0.5, y: 0.5 });
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const flow = useAsyncFlow<"saved" | "deleted">();
   const imageRef = useRef<HTMLDivElement>(null);
 
   const url = normalizeMediaUrl(item.url || item.file);
@@ -67,37 +67,46 @@ export function MediaDrawer({
   };
 
   const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await saveMedia(item.id, { alt_text: alt, title });
-      setSaved(true);
-      onChanged();
-    } catch {
-      setError("Could not save this.");
-    } finally {
-      setBusy(false);
-    }
+    const outcome = await flow.run(
+      async () => {
+        await saveMedia(item.id, { alt_text: alt, title });
+        return "saved" as const;
+      },
+      { action: "save", fallbackError: "Could not save this." },
+    );
+    if (outcome) onChanged();
   };
 
   const remove = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteMedia(item.id);
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    const outcome = await flow.run(
+      async () => {
+        await deleteMedia(item.id);
+        return "deleted" as const;
+      },
+      {
+        action: "delete",
+        fallbackError: "Could not delete this — it may still be used by an article.",
+      },
+    );
+    if (outcome) {
       onChanged();
       onClose();
-    } catch {
-      // The backend refuses when the file is still referenced; without that
-      // context a failed delete looks like a bug rather than a safeguard.
-      setError("Could not delete this — it may still be used by an article.");
-      setBusy(false);
+    } else {
+      setConfirmingDelete(false);
     }
   };
 
+  const busy = flow.isRunning;
+  const saved = flow.result === "saved";
+  const error = flow.error;
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent side="right" className="sm:max-w-lg">
+      <DialogContent side="right" className="sm:max-w-lg" data-state={flow.dataState}>
         <DialogHeader>
           <DialogTitle className="truncate">{item.title || "Untitled file"}</DialogTitle>
           <DialogDescription>
@@ -111,12 +120,12 @@ export function MediaDrawer({
               <div
                 ref={imageRef}
                 onClick={pickFocal}
-                className="relative cursor-crosshair overflow-hidden rounded-lg border border-[var(--sl-line)] bg-[var(--sl-soft)] bg-[var(--sl-card)]"
+                className="relative cursor-crosshair overflow-hidden rounded-lg border border-[var(--sl-line)] bg-[var(--sl-soft)]"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={url} alt={alt} className="block max-h-64 w-full object-contain" />
                 <span
-                  className="pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--sl-soft)] shadow"
+                  className="pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--sl-accent)] shadow-md ring-2 ring-black/25"
                   style={{ left: `${focal.x * 100}%`, top: `${focal.y * 100}%` }}
                 />
               </div>
@@ -165,7 +174,7 @@ export function MediaDrawer({
               value={alt}
               onChange={(e) => {
                 setAlt(e.target.value);
-                setSaved(false);
+                flow.reset();
               }}
               placeholder="What is in this image, for someone who cannot see it?"
               autoFocus
@@ -185,30 +194,42 @@ export function MediaDrawer({
               value={title}
               onChange={(e) => {
                 setTitle(e.target.value);
-                setSaved(false);
+                flow.reset();
               }}
             />
           </label>
 
           <div>
             <span className="mb-1 block text-xs font-medium text-[var(--sl-muted)]">URL</span>
-            <code className="block break-all rounded bg-[var(--sl-soft)] p-2 font-mono text-xs text-[var(--sl-ink)] bg-[var(--sl-card)]">
+            <code className="block break-all rounded bg-[var(--sl-soft)] p-2 font-mono text-xs text-[var(--sl-ink)]">
               {url}
             </code>
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
         </DialogBody>
 
         <DialogFooter>
-          <Button
-            variant="ghost"
-            className="mr-auto text-red-600"
-            onClick={remove}
-            disabled={busy}
-          >
-            <Trash2 size={14} /> Delete
-          </Button>
+          <div className="mr-auto flex items-center gap-2">
+            <Button
+              variant={confirmingDelete ? "destructive" : "ghost"}
+              className={confirmingDelete ? "" : "text-red-600"}
+              onClick={remove}
+              disabled={busy}
+            >
+              <Trash2 size={14} /> {confirmingDelete ? "Confirm delete" : "Delete"}
+            </Button>
+            {confirmingDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={busy}
+              >
+                Cancel
+              </Button>
+            )}
+          </div>
           {saved && (
             <span className="flex items-center gap-1 text-sm text-emerald-600">
               <Check size={14} /> Saved
