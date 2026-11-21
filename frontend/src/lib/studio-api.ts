@@ -629,6 +629,8 @@ export async function deleteMedia(id: number) {
 
 // -- distribution -----------------------------------------------------------
 
+export type DestinationHealthState = "active" | "paused" | "auto_disabled";
+
 export interface Destination {
   id: number;
   name: string;
@@ -640,6 +642,7 @@ export interface Destination {
   events: string[];
   is_active: boolean;
   is_deliverable: boolean;
+  health_state?: DestinationHealthState;
   disabled_at: string | null;
   disabled_reason: string;
   consecutive_failures: number;
@@ -647,6 +650,13 @@ export interface Destination {
   created_at: string;
   /** Present only in the create response, and never again. */
   secret?: string;
+}
+
+export function deriveDestinationHealth(destination: Destination): DestinationHealthState {
+  if (destination.health_state) return destination.health_state;
+  if (!destination.is_active) return "paused";
+  if (destination.disabled_at) return "auto_disabled";
+  return "active";
 }
 
 export type DeliveryState =
@@ -827,4 +837,23 @@ export async function createSocialPost(body: {
 export async function retrySocialTarget(id: number) {
   const { data } = await studioApi().post<SocialTarget>(`/social/targets/${id}/retry/`);
   return data;
+}
+
+export interface SeoCheckRow {
+  id: string;
+  label: string;
+  status: "pass" | "warn" | "fail";
+  message: string;
+  weight?: number;
+}
+
+export interface SeoAnalysis {
+  score: number;
+  checks: SeoCheckRow[];
+  resolved_seo: {
+    meta_title?: string;
+    meta_description?: string;
+    focus_keyword?: string;
+    canonical_url?: string;
+  };
 }
