@@ -2,7 +2,7 @@
 
 import { CalendarClock, ChevronLeft, ChevronRight, Clock, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { PageShell, QueryState } from "@/components/studio/PageShell";
 import { useStudioQuery } from "@/components/studio/useStudioQuery";
@@ -63,7 +63,7 @@ export default function CalendarPage() {
     return map;
   }, [data]);
 
-  const rescheduleTo = async (entry: CalendarEntry, when: Date) => {
+  const rescheduleTo = useCallback(async (entry: CalendarEntry, when: Date) => {
     if (when.getTime() <= Date.now()) {
       flow.setError("That date has already passed — pick a future time.");
       return false;
@@ -81,7 +81,7 @@ export default function CalendarPage() {
       return true;
     }
     return false;
-  };
+  }, [flow, refresh]);
 
   const drop = async (day: Date) => {
     const entry = dragging;
