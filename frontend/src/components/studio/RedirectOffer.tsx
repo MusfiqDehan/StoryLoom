@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/primitives";
+import { useAsyncFlow } from "@/lib/fsm/useAsyncFlow";
 import { saveRedirect, type MovedPath } from "@/lib/studio-api";
 
 /**
@@ -35,11 +36,11 @@ export function RedirectOffer({
   onClose: () => void;
 }) {
   const [chosen, setChosen] = useState<Set<number> | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState<{ created: number; failed: string[] } | null>(null);
+  const flow = useAsyncFlow<{ created: number; failed: string[] }>();
 
   if (changed.length === 0) return null;
   const selected = chosen ?? new Set(changed.map((row) => row.id));
+  const done = flow.result;
 
   const toggle = (id: number) => {
     const next = new Set(selected);
@@ -49,38 +50,36 @@ export function RedirectOffer({
   };
 
   const create = async () => {
-    setSaving(true);
-    const failed: string[] = [];
-    let created = 0;
-    for (const row of changed) {
-      if (!selected.has(row.id)) continue;
-      try {
-        await saveRedirect(null, {
-          source_path: `/categories/${row.from}`,
-          target_path: `/categories/${row.to}`,
-          status_code: 301,
-          note: `Category "${row.name}" moved`,
-        });
-        created += 1;
-      } catch {
-        // A duplicate source_path is the common failure and a benign one --
-        // a redirect for that path already exists. Reported, not swallowed.
-        failed.push(row.from);
+    await flow.run(async () => {
+      const failed: string[] = [];
+      let created = 0;
+      for (const row of changed) {
+        if (!selected.has(row.id)) continue;
+        try {
+          await saveRedirect(null, {
+            source_path: `/categories/${row.from}`,
+            target_path: `/categories/${row.to}`,
+            status_code: 301,
+            note: `Category "${row.name}" moved`,
+          });
+          created += 1;
+        } catch {
+          failed.push(row.from);
+        }
       }
-    }
-    setDone({ created, failed });
-    setSaving(false);
+      return { created, failed };
+    });
   };
 
   const close = () => {
     setChosen(null);
-    setDone(null);
+    flow.reset();
     onClose();
   };
 
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent>
+      <DialogContent data-state={flow.dataState}>
         <DialogHeader>
           <DialogTitle>
             {done ? "Redirects created" : `${changed.length} URL${changed.length === 1 ? "" : "s"} changed`}
@@ -144,8 +143,8 @@ export function RedirectOffer({
               <Button variant="secondary" onClick={close}>
                 Skip
               </Button>
-              <Button onClick={create} disabled={saving || selected.size === 0}>
-                {saving && <Loader2 size={14} className="animate-spin" />}
+              <Button onClick={create} disabled={flow.isRunning || selected.size === 0}>
+                {flow.isRunning && <Loader2 size={14} className="animate-spin" />}
                 Create {selected.size} redirect{selected.size === 1 ? "" : "s"}
               </Button>
             </>
