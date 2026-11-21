@@ -254,18 +254,27 @@ export default class InteractiveAudioTool {
     const contentArea = _textarea(form, "<p>Details shown when this chapter is opened…</p>", vals.modal_content);
     contentArea.addEventListener("input", () => { vals.modal_content = contentArea.value; });
 
+    const errBox = document.createElement("p");
+    errBox.setAttribute("role", "alert");
+    errBox.style.cssText =
+      "display:none;margin:10px 0 0;padding:8px 10px;border-radius:6px;background:#fef2f2;color:#dc2626;font-size:12px;border:1px solid #fecaca;";
+    form.appendChild(errBox);
+
     const { cancelBtn, saveBtn } = _formButtons(form, existing ? "Save Changes" : "Add Chapter");
     cancelBtn.addEventListener("click", () => overlay.remove());
     saveBtn.addEventListener("click", () => {
       const time = _parseTime(vals.timeStr);
       if (time === null) {
-        alert("Please enter a valid time in MM:SS format.");
+        errBox.textContent = "Please enter a valid time in MM:SS format.";
+        errBox.style.display = "block";
         return;
       }
       if (!vals.label.trim()) {
-        alert("Please enter a chapter label.");
+        errBox.textContent = "Please enter a chapter label.";
+        errBox.style.display = "block";
         return;
       }
+      errBox.style.display = "none";
       if (existing) {
         const idx = this.data.chapters.findIndex((c) => c.id === existing.id);
         if (idx !== -1) {
