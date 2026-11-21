@@ -2,29 +2,11 @@
 
 import type { OutputData } from "@editorjs/editorjs";
 import { AlertCircle, Check, Loader2, XCircle } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import { SnippetPreview } from "@/components/studio/SnippetPreview";
-import { studioApi } from "@/lib/studio-api";
-
-interface CheckRow {
-  id: string;
-  label: string;
-  status: "pass" | "warn" | "fail";
-  message: string;
-  weight?: number;
-}
-
-interface Analysis {
-  score: number;
-  checks: CheckRow[];
-  resolved_seo: {
-    meta_title?: string;
-    meta_description?: string;
-    focus_keyword?: string;
-    canonical_url?: string;
-  };
-}
+import { seoPanelReducer } from "@/lib/fsm/composer";
+import { studioApi, type SeoAnalysis } from "@/lib/studio-api";
 
 const DEBOUNCE_MS = 500;
 
@@ -49,27 +31,25 @@ export function SeoPanel({
   blocks: OutputData | undefined;
   siteUrl: string;
 }) {
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(seoPanelReducer, { kind: "idle" });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRef = useRef({ title, excerpt, blocks });
-  latestRef.current = { title, excerpt, blocks };
+
+  useEffect(() => {
+    latestRef.current = { title, excerpt, blocks };
+  }, [title, excerpt, blocks]);
 
   const analyze = useCallback(async () => {
-    setPending(true);
-    setError(null);
+    dispatch({ type: "LOAD_START" });
     try {
       const { title: t, excerpt: e, blocks: b } = latestRef.current;
-      const { data } = await studioApi().post<Analysis>(
+      const { data } = await studioApi().post<SeoAnalysis>(
         `/articles/${encodeURIComponent(slug)}/analyze-seo/`,
         { title: t, excerpt: e, content: { blocks: b?.blocks ?? [] } },
       );
-      setAnalysis(data);
+      dispatch({ type: "LOAD_SUCCESS", analysis: data });
     } catch {
-      setError("Could not score this draft.");
-    } finally {
-      setPending(false);
+      dispatch({ type: "LOAD_ERROR", message: "Could not score this draft." });
     }
   }, [slug]);
 
@@ -81,12 +61,20 @@ export function SeoPanel({
     };
   }, [analyze, title, excerpt, blocks]);
 
+  const analysis =
+    state.kind === "ready"
+      ? state.analysis
+      : state.kind === "pending" || state.kind === "error"
+        ? state.previous
+        : null;
+  const pending = state.kind === "pending";
+  const error = state.kind === "error" ? state.message : null;
   const seo = analysis?.resolved_seo ?? {};
   const failing = (analysis?.checks ?? []).filter((c) => c.status !== "pass");
   const passing = (analysis?.checks ?? []).filter((c) => c.status === "pass");
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" data-state={state.kind}>
       <SnippetPreview
         title={seo.meta_title || title}
         description={seo.meta_description || excerpt}
