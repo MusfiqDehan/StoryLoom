@@ -353,6 +353,12 @@ export default class InteractiveInlineTool {
     });
     rightSide.appendChild(cancelBtn);
 
+    const errBox = document.createElement("p");
+    errBox.setAttribute("role", "alert");
+    errBox.style.cssText =
+      "display:none;margin:10px 0 0;padding:8px 10px;border-radius:6px;background:#fef2f2;color:#dc2626;font-size:12px;border:1px solid #fecaca;";
+    form.appendChild(errBox);
+
     const saveBtn = mkBtn(
       isNew ? "Add Annotation" : "Save Changes",
       "#3b82f6",
@@ -361,9 +367,11 @@ export default class InteractiveInlineTool {
     saveBtn.style.padding = "8px 16px";
     saveBtn.addEventListener("click", () => {
       if (!working.modal_title.trim()) {
-        alert("Please enter an annotation title.");
+        errBox.textContent = "Please enter an annotation title.";
+        errBox.style.display = "block";
         return;
       }
+      errBox.style.display = "none";
 
       // Persist annotation data on the span
       span.setAttribute("data-annotation", JSON.stringify(working));
