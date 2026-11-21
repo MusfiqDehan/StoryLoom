@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Loader2, Save, User } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { PageShell } from "@/components/studio/PageShell";
 import { Button } from "@/components/ui/Button";
@@ -14,14 +14,15 @@ export default function ProfilePage() {
   const [firstName, setFirstName] = useState(user?.first_name ?? "");
   const [lastName, setLastName] = useState(user?.last_name ?? "");
   const [bio, setBio] = useState(user?.bio ?? "");
+  const [prevUser, setPrevUser] = useState(user);
   const flow = useAsyncFlow<void>();
 
-  useEffect(() => {
-    if (!user) return;
-    setFirstName(user.first_name ?? "");
-    setLastName(user.last_name ?? "");
-    setBio(user.bio ?? "");
-  }, [user]);
+  if (user !== prevUser) {
+    setPrevUser(user);
+    setFirstName(user?.first_name ?? "");
+    setLastName(user?.last_name ?? "");
+    setBio(user?.bio ?? "");
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
