@@ -69,7 +69,7 @@ export function StudioTopBar() {
   return (
     <header className="sl-admin-topbar">
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-[var(--sl-ink)] transition hover:bg-[var(--sl-soft)] focus:outline-none focus:ring-2 focus:ring-ring hover:bg-[var(--sl-card)]">
+        <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-[var(--sl-ink)] transition hover:bg-[var(--sl-soft)] focus:outline-none focus:ring-2 focus:ring-ring">
           <Globe size={15} className="text-[var(--sl-muted)]" />
           {activeSite?.name ?? "Default site"}
           <ChevronDown size={14} className="text-[var(--sl-muted)]" />
@@ -97,7 +97,7 @@ export function StudioTopBar() {
             href={activeSite.base_url}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition hover:bg-[var(--sl-soft)] hover:text-[var(--sl-ink)] hover:bg-[var(--sl-card)] hover:text-[var(--sl-muted)]"
+            className="hidden sm:flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-[var(--sl-muted)] transition hover:bg-[var(--sl-soft)] hover:text-[var(--sl-ink)]"
           >
             View site <ExternalLink size={13} />
           </a>
