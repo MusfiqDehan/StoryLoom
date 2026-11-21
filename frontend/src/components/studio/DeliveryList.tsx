@@ -136,7 +136,7 @@ export function DeliveryList({
             )}
 
             {expanded && (
-              <div className="space-y-3 border-t border-[var(--sl-line)] bg-[var(--sl-soft)] px-4 py-3 bg-[var(--sl-card)]">
+              <div className="space-y-3 border-t border-[var(--sl-line)] bg-[var(--sl-soft)] px-4 py-3">
                 {delivery.last_error && (
                   <div>
                     <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-red-500">
