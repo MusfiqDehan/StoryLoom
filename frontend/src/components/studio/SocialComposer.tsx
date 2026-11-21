@@ -1,12 +1,17 @@
 "use client";
 
 import { AlertTriangle, Clock, Loader2, Send, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useReducer } from "react";
 
-import { useStudioQuery } from "@/components/studio/useStudioQuery";
 import { SocialPreview } from "@/components/studio/SocialPreview";
+import { useStudioQuery } from "@/components/studio/useStudioQuery";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
+import { extractErrorMessage } from "@/lib/fsm";
+import {
+  initialSocialComposerState,
+  socialComposerReducer,
+} from "@/lib/fsm/composer";
 import { countedLength } from "@/lib/graphemes";
 import {
   createSocialPost,
@@ -17,181 +22,225 @@ import {
   type SocialPost,
 } from "@/lib/studio-api";
 
-/**
- * Two-column composer: compose left, faithful previews right.
- *
- * The counters read their limits from `/social/platform-specs/` rather than
- * from constants here. That endpoint serves the same table the server
- * validates against, so "the composer said it fits and the platform truncated
- * it" cannot happen through a stale copy — which is the failure mode a
- * duplicated constant guarantees eventually.
- */
 export function SocialComposer({
   articleId,
   articleTitle,
+  compact = false,
   onPublished,
 }: {
   articleId?: number;
   articleTitle?: string;
+  /** Forces single-column stacking inside narrow sidebars like the article inspector. */
+  compact?: boolean;
   onPublished?: (post: SocialPost) => void;
 }) {
   const { data: specs } = useStudioQuery(getPlatformSpecs, []);
-  const { data: accounts, loading } = useStudioQuery(listSocialAccounts, []);
+  const { data: accounts, loading, error: loadError, refresh: reload } = useStudioQuery(
+    listSocialAccounts,
+    [],
+  );
 
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [captions, setCaptions] = useState<Record<number, string>>({});
-  const [active, setActive] = useState<number | null>(null);
-  const [scheduleAt, setScheduleAt] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<SocialPost | null>(null);
+  const [state, dispatch] = useReducer(
+    socialComposerReducer,
+    initialSocialComposerState,
+  );
 
   const specByKey = useMemo(
     () => Object.fromEntries((specs ?? []).map((spec) => [spec.key, spec])),
     [specs],
   );
-  const usable = (accounts ?? []).filter((account) => account.is_usable);
+  const usable = useMemo(
+    () => (accounts ?? []).filter((account) => account.is_usable),
+    [accounts],
+  );
+
+  useEffect(() => {
+    if (accounts) {
+      dispatch({ type: "SYNC_ACCOUNTS", accounts });
+    }
+  }, [accounts]);
+
+  const selectedSet = useMemo(
+    () => new Set(state.selectedIds),
+    [state.selectedIds],
+  );
   const activeAccount =
-    usable.find((account) => account.id === active) ??
-    usable.find((account) => selected.has(account.id)) ??
+    usable.find((account) => account.id === state.activeAccountId) ??
+    usable.find((account) => selectedSet.has(account.id)) ??
     null;
 
-  const toggle = (id: number) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else {
-      next.add(id);
-      setActive(id);
-    }
-    setSelected(next);
-  };
+  const busy =
+    state.phase.kind === "generating" || state.phase.kind === "submitting";
 
   const suggest = async () => {
     if (!articleId) return;
-    setBusy(true);
-    setError(null);
+    dispatch({ type: "GENERATE_START" });
     try {
       const platforms = Array.from(
         new Set(
           usable
-            .filter((account) => selected.has(account.id))
+            .filter((account) => selectedSet.has(account.id))
             .map((account) => account.platform),
         ),
       );
       const previews = await deriveCaptions({ article: articleId, platforms });
       const byPlatform = Object.fromEntries(previews.map((p) => [p.platform, p]));
-      const next = { ...captions };
+      const next: Record<number, string> = {};
       for (const account of usable) {
-        if (!selected.has(account.id)) continue;
-        // Only fill what is empty. Overwriting a caption someone wrote is the
-        // one thing an "improve this" button must never do.
-        if (!next[account.id]?.trim()) {
+        if (!selectedSet.has(account.id)) continue;
+        if (!state.captions[account.id]?.trim()) {
           next[account.id] = byPlatform[account.platform]?.caption ?? "";
         }
       }
-      setCaptions(next);
+      dispatch({ type: "GENERATE_DONE", captions: next });
       const impossible = previews.filter((p) => !p.fits);
       if (impossible.length) {
-        setError(
-          `Too long for ${impossible.map((p) => p.platform).join(", ")} even with the ` +
+        dispatch({
+          type: "FAIL",
+          message:
+            `Too long for ${impossible.map((p) => p.platform).join(", ")} even with the ` +
             "excerpt removed — shorten the title or drop a hashtag.",
-        );
+        });
       }
     } catch {
-      setError("Could not generate captions.");
-    } finally {
-      setBusy(false);
+      dispatch({ type: "FAIL", message: "Could not generate captions." });
     }
   };
 
   const submit = async () => {
-    setBusy(true);
-    setError(null);
+    dispatch({ type: "SUBMIT_START" });
     try {
       const post = await createSocialPost({
         article: articleId ?? null,
-        scheduled_at: scheduleAt ? new Date(scheduleAt).toISOString() : null,
+        scheduled_at: state.scheduleAt
+          ? new Date(state.scheduleAt).toISOString()
+          : null,
         targets: usable
-          .filter((account) => selected.has(account.id))
+          .filter((account) => selectedSet.has(account.id))
           .map((account) => ({
             account: account.id,
-            caption: captions[account.id] ?? "",
+            caption: state.captions[account.id] ?? "",
           })),
       });
-      setResult(post);
+      dispatch({ type: "SUBMIT_DONE", post });
       onPublished?.(post);
-    } catch (err: unknown) {
-      const data = (err as { response?: { data?: Record<string, string[]> } }).response
-        ?.data;
-      setError(data ? Object.values(data).flat().join(" ") : "Could not submit.");
-    } finally {
-      setBusy(false);
+    } catch (err) {
+      const { message } = extractErrorMessage(err, "Could not submit.");
+      dispatch({ type: "FAIL", message });
     }
   };
 
-  if (result) return <ResultStrip post={result} onReset={() => setResult(null)} />;
+  if (state.phase.kind === "submitted") {
+    return (
+      <ResultStrip
+        post={state.phase.post}
+        onReset={() => dispatch({ type: "DISMISS_PHASE" })}
+      />
+    );
+  }
 
   if (loading) {
-    return <p className="py-8 text-center text-sm text-[var(--sl-muted)]">Loading accounts…</p>;
+    return (
+      <p className="py-8 text-center text-sm text-[var(--sl-muted)]" data-state="loading">
+        Loading accounts…
+      </p>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="rounded-xl border border-red-200 p-4 text-center text-sm text-red-700 dark:border-red-900/50 dark:text-red-300" data-state="error">
+        <p>{loadError}</p>
+        <Button size="sm" variant="secondary" className="mt-2" onClick={reload}>
+          Try again
+        </Button>
+      </div>
+    );
   }
   if (usable.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-[var(--sl-line)] p-6 text-center text-sm text-[var(--sl-muted)]">
+      <p
+        className="rounded-xl border border-dashed border-[var(--sl-line)] p-6 text-center text-sm text-[var(--sl-muted)]"
+        data-state="empty"
+      >
         No connected social accounts. Add one in Settings before composing.
       </p>
     );
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div className="space-y-4">
+    <div
+      className={cn("grid gap-6", !compact && "lg:grid-cols-2")}
+      data-state={state.phase.kind}
+    >
+      <div className="min-w-0 space-y-4">
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--sl-muted)]">
             Post to
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {usable.map((account) => (
-              <button
-                key={account.id}
-                onClick={() => toggle(account.id)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
-                  selected.has(account.id)
-                    ? "border-[var(--sl-soft)] bg-[var(--sl-action)] text-white"
-                    : "border-[var(--sl-line)] text-[var(--sl-ink)] hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]",
-                )}
-              >
-                {specByKey[account.platform]?.label ?? account.platform}
-                <span className="opacity-70">{account.handle || account.display_name}</span>
-              </button>
-            ))}
+            {usable.map((account) => {
+              const isSelected = selectedSet.has(account.id);
+              return (
+                <button
+                  key={account.id}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() =>
+                    dispatch({ type: "TOGGLE_ACCOUNT", accountId: account.id })
+                  }
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                    isSelected
+                      ? "border-[var(--sl-action)] bg-[var(--sl-action)] text-white"
+                      : "border-[var(--sl-line)] bg-[var(--sl-card)] text-[var(--sl-ink)] hover:bg-[var(--sl-soft)]",
+                  )}
+                >
+                  {specByKey[account.platform]?.label ?? account.platform}
+                  <span className="opacity-75">
+                    {account.handle || account.display_name}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {selected.size > 0 && (
+        {selectedSet.size > 0 && (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex flex-wrap gap-1">
                 {usable
-                  .filter((a) => selected.has(a.id))
-                  .map((account) => (
-                    <button
-                      key={account.id}
-                      onClick={() => setActive(account.id)}
-                      className={cn(
-                        "rounded-md px-2.5 py-1 text-xs font-medium",
-                        activeAccount?.id === account.id
-                          ? "bg-[var(--sl-card)] text-white bg-[var(--sl-action)] text-[var(--sl-ink)]"
-                          : "bg-[var(--sl-soft)] text-[var(--sl-ink)] bg-[var(--sl-card)]",
-                      )}
-                    >
-                      {specByKey[account.platform]?.label ?? account.platform}
-                    </button>
-                  ))}
+                  .filter((a) => selectedSet.has(a.id))
+                  .map((account) => {
+                    const isActive = activeAccount?.id === account.id;
+                    return (
+                      <button
+                        key={account.id}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() =>
+                          dispatch({ type: "SET_ACTIVE", accountId: account.id })
+                        }
+                        className={cn(
+                          "rounded-md px-2.5 py-1 text-xs font-medium transition",
+                          isActive
+                            ? "bg-[var(--sl-action)] text-white"
+                            : "bg-[var(--sl-soft)] text-[var(--sl-ink)] hover:opacity-90",
+                        )}
+                      >
+                        {specByKey[account.platform]?.label ?? account.platform}
+                      </button>
+                    );
+                  })}
               </div>
               {articleId && (
                 <Button size="sm" variant="secondary" onClick={suggest} disabled={busy}>
-                  <Sparkles size={13} /> Suggest captions
+                  {state.phase.kind === "generating" ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={13} />
+                  )}
+                  Suggest captions
                 </Button>
               )}
             </div>
@@ -199,9 +248,13 @@ export function SocialComposer({
             {activeAccount && (
               <CaptionField
                 key={activeAccount.id}
-                value={captions[activeAccount.id] ?? ""}
-                onChange={(value) =>
-                  setCaptions((prev) => ({ ...prev, [activeAccount.id]: value }))
+                value={state.captions[activeAccount.id] ?? ""}
+                onChange={(caption) =>
+                  dispatch({
+                    type: "SET_CAPTION",
+                    accountId: activeAccount.id,
+                    caption,
+                  })
                 }
                 spec={specByKey[activeAccount.platform]}
               />
@@ -214,8 +267,10 @@ export function SocialComposer({
               <input
                 type="datetime-local"
                 className="input-field"
-                value={scheduleAt}
-                onChange={(e) => setScheduleAt(e.target.value)}
+                value={state.scheduleAt}
+                onChange={(e) =>
+                  dispatch({ type: "SET_SCHEDULE", scheduleAt: e.target.value })
+                }
               />
               <span className="mt-1 block text-xs text-[var(--sl-muted)]">
                 Held here and published at that moment by this CMS, not handed to
@@ -225,39 +280,53 @@ export function SocialComposer({
           </>
         )}
 
-        {error && (
-          <p className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+        {state.phase.kind === "error" && (
+          <p
+            className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+            role="alert"
+          >
             <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-            {error}
+            {state.phase.message}
           </p>
         )}
 
         <Button
           onClick={submit}
-          disabled={busy || selected.size === 0 || hasOverflow(usable, selected, captions, specByKey)}
+          disabled={
+            busy ||
+            selectedSet.size === 0 ||
+            hasOverflow(usable, selectedSet, state.captions, specByKey)
+          }
         >
-          {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-          {scheduleAt ? "Schedule" : "Publish"} to {selected.size}
+          {state.phase.kind === "submitting" ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <Send size={15} />
+          )}
+          {state.scheduleAt ? "Schedule" : "Publish"} to {selectedSet.size}
         </Button>
       </div>
 
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--sl-muted)]">
           Preview
         </p>
         {usable
-          .filter((account) => selected.has(account.id))
+          .filter((account) => selectedSet.has(account.id))
           .map((account) => (
             <SocialPreview
               key={account.id}
               platform={account.platform}
-              caption={captions[account.id] || `Share “${articleTitle ?? "this article"}”…`}
+              caption={
+                state.captions[account.id] ||
+                `Share “${articleTitle ?? "this article"}”…`
+              }
               accountName={account.display_name}
               handle={account.handle}
               avatarUrl={account.avatar_url}
             />
           ))}
-        {selected.size === 0 && (
+        {selectedSet.size === 0 && (
           <p className="rounded-xl border border-dashed border-[var(--sl-line)] p-6 text-center text-sm text-[var(--sl-muted)]">
             Pick an account to see how the post will look.
           </p>
@@ -317,15 +386,9 @@ function hasOverflow(
   });
 }
 
-/**
- * Per-target outcome after submitting.
- *
- * A single "posted!" toast would hide the one platform that refused, and the
- * editor would find out when someone asks why it never appeared.
- */
 function ResultStrip({ post, onReset }: { post: SocialPost; onReset: () => void }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-state="submitted">
       <ul className="divide-y divide-[var(--sl-line)] rounded-xl border border-[var(--sl-line)]">
         {post.targets.map((target) => (
           <li key={target.id} className="flex items-start gap-3 px-4 py-3 text-sm">
