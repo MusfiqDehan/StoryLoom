@@ -127,8 +127,8 @@ export function CategoryTree({
           className={cn(
             "group flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm transition-colors",
             selected?.id === node.id
-              ? "bg-[var(--sl-soft)] text-[var(--sl-accent)] dark:bg-primary-950/50"
-              : "hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]",
+              ? "bg-[var(--sl-soft)] text-[var(--sl-accent)]"
+              : "hover:bg-[var(--sl-soft)]",
             isDropInside && "ring-2 ring-primary-500",
             dragging?.id === node.id && "opacity-40",
           )}
@@ -155,7 +155,7 @@ export function CategoryTree({
           <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
 
           {typeof node.article_count === "number" && node.article_count > 0 && (
-            <span className="shrink-0 rounded bg-[var(--sl-soft)] px-1.5 text-xs tabular-nums text-[var(--sl-muted)] bg-[var(--sl-card)]">
+            <span className="shrink-0 rounded bg-[var(--sl-soft)] px-1.5 text-xs tabular-nums text-[var(--sl-muted)]">
               {node.article_count}
             </span>
           )}
@@ -165,7 +165,7 @@ export function CategoryTree({
               onCreateChild(node);
             }}
             title={`Add a category under ${node.name}`}
-            className="shrink-0 rounded p-0.5 opacity-0 transition hover:bg-[var(--sl-soft)] hover:text-[var(--sl-ink)] group-hover:opacity-100"
+            className="shrink-0 rounded p-0.5 opacity-100 transition hover:bg-[var(--sl-soft)] hover:text-[var(--sl-ink)] sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
           >
             <CornerDownRight size={13} />
           </button>
