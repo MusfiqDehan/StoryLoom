@@ -110,8 +110,8 @@ export function SnippetPreview({
               onClick={() => setDevice(option)}
               className={`rounded px-2 py-0.5 capitalize transition ${
                 device === option
-                  ? "bg-[var(--sl-card)] text-white bg-[var(--sl-action)] text-[var(--sl-ink)]"
-                  : "text-[var(--sl-muted)]"
+                  ? "bg-[var(--sl-action)] text-white shadow-sm"
+                  : "text-[var(--sl-muted)] hover:text-[var(--sl-ink)]"
               }`}
             >
               {option}
