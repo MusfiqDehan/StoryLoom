@@ -231,7 +231,7 @@ function InviteDialog({ onClose }: { onClose: (changed: boolean) => void }) {
               {ROLES.map((option) => (
                 <label
                   key={option.value}
-                  className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]"
+                  className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--sl-soft)]"
                 >
                   <input
                     type="radio"
