@@ -19,6 +19,10 @@ interface Chapter {
   modal_title?: string;
 }
 
+type PlayerState =
+  | { kind: "facade" }
+  | { kind: "playing"; startAt: number | null };
+
 export function YouTubeEmbed({
   source,
   caption,
@@ -29,28 +33,26 @@ export function YouTubeEmbed({
   chapters?: Chapter[];
 }) {
   const videoId = extractId(source);
-  const [startAt, setStartAt] = useState<number | null>(null);
-  const [playing, setPlaying] = useState(false);
+  const [player, setPlayer] = useState<PlayerState>({ kind: "facade" });
   const { open, has } = useAnnotations();
 
   if (!videoId) return null;
 
   const jump = (chapter: Chapter) => {
-    setStartAt(chapter.time || 0);
-    setPlaying(true);
+    setPlayer({ kind: "playing", startAt: chapter.time || 0 });
     if (chapter.id && has(chapter.id)) open(chapter.id);
   };
 
   return (
-    <figure className="not-prose space-y-3">
+    <figure className="not-prose space-y-3" data-state={player.kind}>
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-slate-900">
-        {playing ? (
+        {player.kind === "playing" ? (
           <iframe
             // Remounting on startAt is what makes the chapter seek take effect;
             // the embed has no imperative seek API from the parent frame.
-            key={startAt ?? "start"}
+            key={player.startAt ?? "start"}
             src={`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1${
-              startAt ? `&start=${Math.floor(startAt)}` : ""
+              player.startAt ? `&start=${Math.floor(player.startAt)}` : ""
             }`}
             title={caption || "Embedded video"}
             className="absolute inset-0 h-full w-full"
@@ -60,7 +62,7 @@ export function YouTubeEmbed({
         ) : (
           <button
             type="button"
-            onClick={() => setPlaying(true)}
+            onClick={() => setPlayer({ kind: "playing", startAt: null })}
             className="group absolute inset-0 h-full w-full"
             aria-label="Play video"
           >
