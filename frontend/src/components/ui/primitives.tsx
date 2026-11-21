@@ -35,8 +35,8 @@ const overlayClass =
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
-    /** Slide in from the right instead of centring -- used for the media drawer. */
-    side?: "center" | "right";
+    /** Slide in from the right or left instead of centring -- used for drawers. */
+    side?: "center" | "right" | "left";
   }
 >(({ className, children, side = "center", ...props }, ref) => (
   <DialogPrimitive.Portal>
@@ -47,8 +47,10 @@ export const DialogContent = React.forwardRef<
         "fixed z-50 border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         side === "center"
-          ? "left-1/2 top-1/2 max-h-[85vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-2xl data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95"
-          : "inset-y-0 right-0 h-full w-full max-w-xl data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
+          ? "left-1/2 top-1/2 max-h-[85vh] w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-2xl data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 sm:w-full"
+          : side === "left"
+            ? "inset-y-0 left-0 h-full w-full max-w-sm data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left"
+            : "inset-y-0 right-0 h-full w-full max-w-xl data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
         "flex flex-col",
         className,
       )}
