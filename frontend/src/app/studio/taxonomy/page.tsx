@@ -10,6 +10,7 @@ import { TagManager } from "@/components/studio/TagManager";
 import { useStudioQuery } from "@/components/studio/useStudioQuery";
 import { Button } from "@/components/ui/Button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/primitives";
+import { useAsyncFlow } from "@/lib/fsm/useAsyncFlow";
 import {
   getCategoryTree,
   saveCategory,
@@ -131,54 +132,43 @@ function CategoryForm({
   const [slug, setSlug] = useState(category?.slug ?? "");
   const [description, setDescription] = useState(category?.description ?? "");
   const [isActive, setIsActive] = useState(category?.is_active ?? true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const actionFlow = useAsyncFlow();
 
   const slugChanged = Boolean(category && slug && slug !== category.slug);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      await saveCategory(category?.slug ?? null, {
-        name,
-        description,
-        is_active: isActive,
-        ...(category ? {} : { parent: parent?.id ?? null }),
-        ...(slugChanged ? { slug } : {}),
-      });
-      onDone();
-    } catch (err: unknown) {
-      const data = (err as { response?: { data?: Record<string, string[]> } }).response
-        ?.data;
-      setError(
-        data ? Object.values(data).flat().join(" ") : "Could not save this category.",
-      );
-    } finally {
-      setSaving(false);
-    }
+    await actionFlow.run(
+      async () => {
+        await saveCategory(category?.slug ?? null, {
+          name,
+          description,
+          is_active: isActive,
+          ...(category ? {} : { parent: parent?.id ?? null }),
+          ...(slugChanged ? { slug } : {}),
+        });
+        onDone();
+      },
+      "Could not save this category.",
+    );
   };
 
   const remove = async () => {
     if (!category) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await studioApi().delete(`/categories/${encodeURIComponent(category.slug)}/`);
-      onDone();
-      onCancel();
-    } catch (err: unknown) {
-      const response = (err as { response?: { data?: { detail?: string } } }).response;
-      setError(response?.data?.detail ?? "Could not delete this category.");
-    } finally {
-      setSaving(false);
-    }
+    await actionFlow.run(
+      async () => {
+        await studioApi().delete(`/categories/${encodeURIComponent(category.slug)}/`);
+        onDone();
+        onCancel();
+      },
+      "Could not delete this category.",
+    );
   };
 
   return (
     <form
       onSubmit={submit}
+      data-state={actionFlow.dataState}
       className="space-y-4 rounded-xl border border-[var(--sl-line)] bg-[var(--sl-card)] p-5"
     >
       <h2 className="font-semibold text-[var(--sl-ink)]">
@@ -238,11 +228,19 @@ function CategoryForm({
         Visible on the public site
       </label>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {actionFlow.error && (
+        <p role="alert" className="text-sm text-red-600">
+          {actionFlow.error}
+        </p>
+      )}
 
-      <div className="flex items-center gap-2 pt-1">
-        <Button type="submit" size="sm" disabled={saving}>
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <Button type="submit" size="sm" disabled={actionFlow.isRunning}>
+          {actionFlow.isRunning ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Save size={14} />
+          )}
           Save
         </Button>
         <Button type="button" size="sm" variant="secondary" onClick={onCancel}>
@@ -255,7 +253,7 @@ function CategoryForm({
             variant="ghost"
             className="ml-auto text-red-600"
             onClick={remove}
-            disabled={saving}
+            disabled={actionFlow.isRunning}
           >
             <Trash2 size={14} /> Delete
           </Button>
