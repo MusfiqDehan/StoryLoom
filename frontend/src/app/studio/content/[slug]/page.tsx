@@ -108,7 +108,17 @@ export default function StudioArticleEditor() {
     };
   }, [slug]);
 
-  useEffect(() => loadArticle(), [loadArticle]);
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        loadArticle();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadArticle]);
 
   const refreshRevisions = useCallback(() => {
     listRevisions(slug)
