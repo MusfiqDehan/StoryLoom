@@ -1,21 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
+import { autosaveReducer, type SaveState } from "@/lib/fsm/autosave";
 import { StaleContentError, saveArticle, type StudioArticle } from "@/lib/studio-api";
 
-export type SaveState =
-  | { kind: "idle" }
-  | { kind: "dirty" }
-  | { kind: "saving" }
-  | { kind: "saved"; at: number }
-  | { kind: "conflict"; currentVersion: string }
-  | { kind: "error"; message: string };
+export type { SaveState } from "@/lib/fsm/autosave";
 
 const DEBOUNCE_MS = 2000;
 
 /**
- * Debounced autosave with optimistic-concurrency handling.
+ * Debounced autosave with optimistic-concurrency handling and an explicit
+ * finite-state reducer (`idle | dirty | saving | saved | conflict | error`).
  *
  * Sends the `content_hash` the article was loaded at as `If-Match`, and stops
  * dead on a 409 instead of retrying. Retrying a conflict is the one thing that
@@ -24,7 +20,7 @@ const DEBOUNCE_MS = 2000;
  * header exists to prevent.
  */
 export function useAutosave(slug: string | null, baseVersion: string | null) {
-  const [state, setState] = useState<SaveState>({ kind: "idle" });
+  const [state, dispatch] = useReducer(autosaveReducer, { kind: "idle" });
   const versionRef = useRef<string | null>(baseVersion);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<Partial<StudioArticle> | null>(null);
@@ -45,22 +41,22 @@ export function useAutosave(slug: string | null, baseVersion: string | null) {
     const patch = pendingRef.current;
     pendingRef.current = null;
     inFlightRef.current = true;
-    setState({ kind: "saving" });
+    dispatch({ type: "SAVE_START" });
 
     try {
       const saved = await saveArticle(slug, patch, versionRef.current ?? undefined);
       versionRef.current = saved.content_hash;
-      setState({ kind: "saved", at: Date.now() });
+      dispatch({ type: "SAVE_SUCCEED", at: Date.now() });
       return saved;
     } catch (error) {
       // Put the edit back either way, so nothing typed is ever dropped on the
       // floor and "keep mine" / retry has something to resend.
       pendingRef.current = { ...patch, ...(pendingRef.current ?? {}) };
       if (error instanceof StaleContentError) {
-        setState({ kind: "conflict", currentVersion: error.currentVersion });
+        dispatch({ type: "SAVE_CONFLICT", currentVersion: error.currentVersion });
       } else {
-        setState({
-          kind: "error",
+        dispatch({
+          type: "SAVE_ERROR",
           message: "Could not save. Your changes are still here — retrying will resend them.",
         });
       }
@@ -72,7 +68,7 @@ export function useAutosave(slug: string | null, baseVersion: string | null) {
   const queue = useCallback(
     (patch: Partial<StudioArticle>) => {
       pendingRef.current = { ...(pendingRef.current ?? {}), ...patch };
-      setState((prev) => (prev.kind === "conflict" ? prev : { kind: "dirty" }));
+      dispatch({ type: "MARK_DIRTY" });
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(flush, DEBOUNCE_MS);
     },
@@ -84,8 +80,10 @@ export function useAutosave(slug: string | null, baseVersion: string | null) {
     const current = stateRef.current;
     if (current.kind !== "conflict") return;
     versionRef.current = current.currentVersion;
-    setState({ kind: "dirty" });
-    stateRef.current = { kind: "dirty" };
+    const clearedState: SaveState = { kind: "dirty" };
+    stateRef.current = clearedState;
+    dispatch({ type: "RESET" });
+    dispatch({ type: "MARK_DIRTY" });
     await flush();
   }, [flush]);
 
@@ -94,9 +92,7 @@ export function useAutosave(slug: string | null, baseVersion: string | null) {
     return flush();
   }, [flush]);
 
-  // Warn before leaving with unsaved work. The debounce window is only two
-  // seconds, but a failed or conflicted save can leave changes pending
-  // indefinitely.
+  // Warn before leaving with unsaved work.
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       const kind = stateRef.current.kind;
@@ -115,7 +111,13 @@ export function useAutosave(slug: string | null, baseVersion: string | null) {
     };
   }, []);
 
-  return { state, queue, saveNow, keepMine, markVersion: (v: string) => {
-    versionRef.current = v;
-  } };
+  return {
+    state,
+    queue,
+    saveNow,
+    keepMine,
+    markVersion: (v: string) => {
+      versionRef.current = v;
+    },
+  };
 }
