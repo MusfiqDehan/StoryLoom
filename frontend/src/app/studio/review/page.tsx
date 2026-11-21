@@ -85,7 +85,7 @@ export default function ReviewPage() {
                         "flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition",
                         openId === article.id
                           ? "bg-[var(--sl-soft)] dark:bg-primary-950/40"
-                          : "hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]",
+                          : "hover:bg-[var(--sl-soft)]",
                       )}
                     >
                       <span className="w-full truncate text-sm font-medium text-[var(--sl-ink)]">
