@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/primitives";
+import { useAsyncFlow } from "@/lib/fsm/useAsyncFlow";
 import { relativeTime } from "@/lib/relative-time";
 import {
   deleteRedirect,
@@ -189,8 +190,7 @@ function RedirectDialog({
   );
   const [isActive, setIsActive] = useState(redirect?.is_active ?? true);
   const [note, setNote] = useState(redirect?.note ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const actionFlow = useAsyncFlow();
 
   const clash = existing.find(
     (row) => row.source_path === normalise(source) && row.id !== redirect?.id,
@@ -198,37 +198,35 @@ function RedirectDialog({
   const selfLoop = normalise(source) === normalise(target) && source !== "";
 
   const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await saveRedirect(redirect?.id ?? null, {
-        source_path: source,
-        target_path: target,
-        status_code: code,
-        is_active: isActive,
-        note,
-      });
-      onClose(true);
-    } catch (err: unknown) {
-      const data = (err as { response?: { data?: Record<string, string[]> } }).response
-        ?.data;
-      setError(
-        data ? Object.values(data).flat().join(" ") : "Could not save this redirect.",
-      );
-      setBusy(false);
-    }
+    await actionFlow.run(
+      async () => {
+        await saveRedirect(redirect?.id ?? null, {
+          source_path: source,
+          target_path: target,
+          status_code: code,
+          is_active: isActive,
+          note,
+        });
+        onClose(true);
+      },
+      "Could not save this redirect.",
+    );
   };
 
   const remove = async () => {
     if (!redirect) return;
-    setBusy(true);
-    await deleteRedirect(redirect.id);
-    onClose(true);
+    await actionFlow.run(
+      async () => {
+        await deleteRedirect(redirect.id);
+        onClose(true);
+      },
+      "Could not delete this redirect.",
+    );
   };
 
   return (
     <Dialog open onOpenChange={() => onClose(false)}>
-      <DialogContent>
+      <DialogContent data-state={actionFlow.dataState}>
         <DialogHeader>
           <DialogTitle>{redirect ? "Edit redirect" : "New redirect"}</DialogTitle>
           <DialogDescription>
@@ -310,7 +308,11 @@ function RedirectDialog({
             Active
           </label>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {actionFlow.error && (
+            <p role="alert" className="text-sm text-red-600">
+              {actionFlow.error}
+            </p>
+          )}
         </DialogBody>
 
         <DialogFooter>
@@ -319,7 +321,7 @@ function RedirectDialog({
               variant="ghost"
               className="mr-auto text-red-600"
               onClick={remove}
-              disabled={busy}
+              disabled={actionFlow.isRunning}
             >
               <Trash2 size={14} /> Delete
             </Button>
@@ -327,8 +329,11 @@ function RedirectDialog({
           <Button variant="secondary" onClick={() => onClose(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={busy || selfLoop || !source || !target}>
-            {busy && <Loader2 size={14} className="animate-spin" />} Save
+          <Button
+            onClick={submit}
+            disabled={actionFlow.isRunning || selfLoop || !source || !target}
+          >
+            {actionFlow.isRunning && <Loader2 size={14} className="animate-spin" />} Save
           </Button>
         </DialogFooter>
       </DialogContent>
