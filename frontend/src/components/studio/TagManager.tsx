@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
+import { useAsyncFlow } from "@/lib/fsm/useAsyncFlow";
 import { listTags, mergeTags, saveTag, studioApi, type TagRow } from "@/lib/studio-api";
 
 const KIND_TONE = { topic: "blue", series: "purple", format: "slate" } as const;
@@ -93,8 +94,8 @@ export function TagManager() {
               <Badge tone={KIND_TONE[tag.kind] ?? "slate"}>{tag.kind}</Badge>
               <span
                 className={cn(
-                  "w-20 shrink-0 text-right text-xs tabular-nums",
-                  tag.usage_count === 0 ? "text-[var(--sl-muted)]" : "text-[var(--sl-muted)]",
+                  "w-16 sm:w-20 shrink-0 text-right text-xs tabular-nums",
+                  tag.usage_count === 0 ? "text-[var(--sl-muted)]" : "text-[var(--sl-ink)]",
                 )}
               >
                 {tag.usage_count} use{tag.usage_count === 1 ? "" : "s"}
@@ -140,33 +141,27 @@ function MergeDialog({
   candidates: TagRow[];
   onClose: (changed: boolean) => void;
 }) {
-  // Default to the most-used tag as the survivor: it is the one already
-  // carrying the URLs and inbound links worth keeping.
   const [target, setTarget] = useState(
     [...candidates].sort((a, b) => b.usage_count - a.usage_count)[0]?.slug ?? "",
   );
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ moved: number; merged: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const flow = useAsyncFlow<{ moved: number; merged: number }>();
 
   const sources = candidates.filter((tag) => tag.slug !== target);
+  const result = flow.result;
 
   const run = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const outcome = await mergeTags(target, sources.map((tag) => tag.slug));
-      setResult({ moved: outcome.items_moved, merged: outcome.merged.length });
-    } catch {
-      setError("The merge failed. Nothing was changed.");
-    } finally {
-      setBusy(false);
-    }
+    await flow.run(
+      async () => {
+        const outcome = await mergeTags(target, sources.map((tag) => tag.slug));
+        return { moved: outcome.items_moved, merged: outcome.merged.length };
+      },
+      { action: "merge", fallbackError: "The merge failed. Nothing was changed." },
+    );
   };
 
   return (
     <Dialog open onOpenChange={() => onClose(Boolean(result))}>
-      <DialogContent>
+      <DialogContent data-state={flow.dataState}>
         <DialogHeader>
           <DialogTitle>{result ? "Merged" : "Merge tags"}</DialogTitle>
           <DialogDescription>
@@ -186,7 +181,7 @@ function MergeDialog({
                 {candidates.map((tag) => (
                   <label
                     key={tag.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--sl-soft)] hover:bg-[var(--sl-card)]"
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm transition hover:bg-[var(--sl-soft)]"
                   >
                     <input
                       type="radio"
@@ -200,8 +195,6 @@ function MergeDialog({
                 ))}
               </fieldset>
 
-              {/* Named, not counted. "Merge 4 tags?" is not something anyone
-                  can meaningfully agree to when the merge is irreversible. */}
               <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
                 {sources.length === 0
                   ? "Select a different tag to keep."
@@ -209,7 +202,7 @@ function MergeDialog({
               </p>
             </>
           )}
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {flow.error && <p className="mt-3 text-sm text-red-600" role="alert">{flow.error}</p>}
         </DialogBody>
 
         <DialogFooter>
@@ -223,9 +216,9 @@ function MergeDialog({
               <Button
                 variant="destructive"
                 onClick={run}
-                disabled={busy || sources.length === 0}
+                disabled={flow.isRunning || sources.length === 0}
               >
-                {busy && <Loader2 size={14} className="animate-spin" />}
+                {flow.isRunning && <Loader2 size={14} className="animate-spin" />}
                 Merge into “{candidates.find((t) => t.slug === target)?.name}”
               </Button>
             </>
@@ -246,42 +239,32 @@ function TagDialog({
   const [name, setName] = useState(tag?.name ?? "");
   const [kind, setKind] = useState<TagRow["kind"]>(tag?.kind ?? "topic");
   const [description, setDescription] = useState(tag?.description ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const flow = useAsyncFlow<void>();
 
   const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await saveTag(tag?.slug ?? null, { name, kind, description });
-      onClose(true);
-    } catch (err: unknown) {
-      const data = (err as { response?: { data?: Record<string, string[]> } }).response
-        ?.data;
-      setError(data ? Object.values(data).flat().join(" ") : "Could not save this tag.");
-      setBusy(false);
-    }
+    const ok = await flow.run(
+      async () => {
+        await saveTag(tag?.slug ?? null, { name, kind, description });
+      },
+      { action: "save", fallbackError: "Could not save this tag." },
+    );
+    if (ok !== null) onClose(true);
   };
 
   const remove = async () => {
     if (!tag) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await studioApi().delete(`/tags/${encodeURIComponent(tag.slug)}/`);
-      onClose(true);
-    } catch (err: unknown) {
-      const response = (err as { response?: { data?: { detail?: string } } }).response;
-      // The server refuses to delete a tag still in use rather than silently
-      // stripping it off every article; surface its reasoning verbatim.
-      setError(response?.data?.detail ?? "Could not delete this tag.");
-      setBusy(false);
-    }
+    const ok = await flow.run(
+      async () => {
+        await studioApi().delete(`/tags/${encodeURIComponent(tag.slug)}/`);
+      },
+      { action: "delete", fallbackError: "Could not delete this tag." },
+    );
+    if (ok !== null) onClose(true);
   };
 
   return (
     <Dialog open onOpenChange={() => onClose(false)}>
-      <DialogContent>
+      <DialogContent data-state={flow.dataState}>
         <DialogHeader>
           <DialogTitle>{tag ? "Edit tag" : "New tag"}</DialogTitle>
           {tag && (
@@ -324,7 +307,7 @@ function TagDialog({
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {flow.error && <p className="text-sm text-red-600" role="alert">{flow.error}</p>}
         </DialogBody>
 
         <DialogFooter>
@@ -333,7 +316,7 @@ function TagDialog({
               variant="ghost"
               className="mr-auto text-red-600"
               onClick={remove}
-              disabled={busy}
+              disabled={flow.isRunning}
             >
               <Trash2 size={14} /> Delete
             </Button>
@@ -341,8 +324,8 @@ function TagDialog({
           <Button variant="secondary" onClick={() => onClose(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={busy || !name.trim()}>
-            {busy && <Loader2 size={14} className="animate-spin" />} Save
+          <Button onClick={submit} disabled={flow.isRunning || !name.trim()}>
+            {flow.isRunning && <Loader2 size={14} className="animate-spin" />} Save
           </Button>
         </DialogFooter>
       </DialogContent>
