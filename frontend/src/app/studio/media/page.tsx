@@ -142,7 +142,7 @@ export default function MediaPage() {
                 onClick={() => setOpen(item)}
                 className="group block w-full overflow-hidden rounded-lg border border-[var(--sl-line)] bg-[var(--sl-card)] text-left transition hover:border-[var(--sl-soft)] hover:shadow-sm"
               >
-                <div className="relative flex aspect-square items-center justify-center bg-[var(--sl-soft)] bg-[var(--sl-card)]">
+                <div className="relative flex aspect-square items-center justify-center bg-[var(--sl-soft)]">
                   {isImage(item) ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
