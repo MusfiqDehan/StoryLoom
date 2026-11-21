@@ -416,7 +416,7 @@ function MintedKeyDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogBody>
-          <div className="flex items-center gap-2 rounded-lg border border-[var(--sl-line)] bg-[var(--sl-soft)] p-3 bg-[var(--sl-card)]">
+          <div className="flex items-center gap-2 rounded-lg border border-[var(--sl-line)] bg-[var(--sl-soft)] p-3">
             <code className="min-w-0 flex-1 break-all font-mono text-xs">
               {apiKey.key}
             </code>
